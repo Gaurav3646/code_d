@@ -70,20 +70,16 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from langchain_community.document_loaders import PyPDFLoader 
-from langchain_community.document_loaders import Docx2txtLoader, TextLoader
-from langchain_community.document_loaders.merge import MergedDataLoader
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-from langchain_core.documents import Document
-from langchain_postgres import PGVector
-from langchain_postgres.vectorstores import PGVector
+from loaders.pdf_loader import PyPDFLoader
+from embeddings.fastembed import FastEmbedEmbeddings
+from models.document import Document
+from database import PGVector
+import logging
 import os
 import shutil
 import tempfile
 import uuid
-import logging
 from pathlib import Path
 
 app = FastAPI()
@@ -95,7 +91,7 @@ logging.basicConfig(level=logging.INFO)
 
 @app.post("/file/upload")
 async def upload_file(file: UploadFile = File(...)):
-    if file.content_type!= ALLOWED_MIME_TYPE:
+    if file.content_type != ALLOWED_MIME_TYPE:
         raise HTTPException(400, detail="Invalid document type")
 
     file_name = f"{uuid.uuid4()}.pdf"
@@ -110,47 +106,29 @@ async def upload_file(file: UploadFile = File(...)):
         logging.error(f"Error uploading file: {e}")
         raise HTTPException(500, detail="Error uploading file")
 
-   
+    try:
+        # Load the document from the file path
+        loader = PyPDFLoader(file_path=file_path)
+        pages = loader.load_and_split()
+        document = loader.load()
 
+        # Create an instance of FastEmbedEmbeddings
+        embeddings = FastEmbedEmbeddings()
+        document_embeddings = embeddings.embed_documents(document.content)
 
-    # Create a loader for each file
-    loaders = PyPDFLoader(file_path=file_path)
+        # Store embeddings in the database
+        connection = "postgresql+psycopg2://langchain:langchain@localhost:6024/langchain"
+        collection_name = "my_docs"
+        vectorstore = PGVector(embeddings=embeddings, collection_name=collection_name, connection=connection, use_jsonb=True)
+        vectorstore.add_documents(pages)
 
-    
+        os.remove(file_path)
 
-    # loaders.append(TextLoader(files[0]))
-    pages = loaders.load_and_split()
+        return {"file_path": document_embeddings}
+    except Exception as e:
+        logging.error(f"Error processing file: {e}")
+        raise HTTPException(500, detail="Error processing file")
 
-    
-    # Load the document from the file path
-    document = loaders.load()
-
-# # Create an instance of FastEmbedEmbeddings
-    embeddings = FastEmbedEmbeddings()
-
-
-    document_embeddings = embeddings.embed_documents(file_name)
-
-
-
-    # See docker command above to launch a postgres instance with pgvector enabled.
-    connection = "postgresql+psycopg://langchain:langchain@localhost:6024/langchain"  # Uses psycopg3!
-    collection_name = "my_docs"
-
-
-    vectorstore = PGVector(
-        embeddings=embeddings,
-        collection_name=collection_name,
-        connection=connection,
-        use_jsonb=True,
-    )
-
-    vectorstore.add_documents(pages)
-
-    os.remove(file_path)
-
-    # return {"file_name": file_name, "documents": documents}
-    return {"file_path": document_embeddings}
 
 
 
