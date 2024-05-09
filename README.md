@@ -70,11 +70,15 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from loaders.pdf_loader import PyPDFLoader
-from embeddings.fastembed import FastEmbedEmbeddings
-from models.document import Document
-from database import PGVector
+
+from fastapi import File, UploadFile, HTTPException, APIRouter
+from langchain_community.document_loaders import PyPDFLoader 
+from langchain_community.document_loaders import Docx2txtLoader, TextLoader
+from langchain_community.document_loaders.merge import MergedDataLoader
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_core.documents import Document
+from langchain_postgres import PGVector
+from langchain_postgres.vectorstores import PGVector
 import logging
 import os
 import shutil
@@ -82,14 +86,15 @@ import tempfile
 import uuid
 from pathlib import Path
 
-app = FastAPI()
+router = APIRouter()
+
 
 UPLOAD_DIR = "uploads"
 ALLOWED_MIME_TYPE = "application/pdf"
 
 logging.basicConfig(level=logging.INFO)
 
-@app.post("/file/upload")
+@router.post("/file/upload")
 async def upload_file(file: UploadFile = File(...)):
     if file.content_type != ALLOWED_MIME_TYPE:
         raise HTTPException(400, detail="Invalid document type")
@@ -114,7 +119,7 @@ async def upload_file(file: UploadFile = File(...)):
 
         # Create an instance of FastEmbedEmbeddings
         embeddings = FastEmbedEmbeddings()
-        document_embeddings = embeddings.embed_documents(document.content)
+        document_embeddings = embeddings.embed_documents(file_name)
 
         # Store embeddings in the database
         connection = "postgresql+psycopg2://langchain:langchain@localhost:6024/langchain"
@@ -128,6 +133,10 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         logging.error(f"Error processing file: {e}")
         raise HTTPException(500, detail="Error processing file")
+    
+
+
+
 
 
 
